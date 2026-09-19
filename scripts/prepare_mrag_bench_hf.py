@@ -80,13 +80,27 @@ def _save_image(img_struct: Dict[str, Any], path: Path) -> None:
     Image.open(io.BytesIO(img_struct["bytes"])).convert("RGB").save(path)
 
 
+def _image_key(img_struct: Dict[str, Any]) -> str:
+    """Identity of an image for duplicate removal: its exact bytes."""
+    from hashlib import sha256
+
+    return sha256(img_struct["bytes"]).hexdigest()
+
+
 def build_examples(
     rows,
     image_dir: Path,
     *,
     num_candidates: Optional[int],
     include_gt: bool,
+    dedup: bool = True,
 ):
+    """Yield one candidate-pool example per question.
+
+    With ``dedup`` (the default) the pool is the union of the ground-truth and
+    the retrieved images with duplicate images removed, which is how the paper
+    describes it (§5.1). Pass ``dedup=False`` to keep every copy instead.
+    """
     for rec in rows:
         qid = str(rec["id"])
         qdir = image_dir / qid
@@ -97,9 +111,14 @@ def build_examples(
 
         candidates: List[CandidateImage] = []
         gt_image_ids: List[str] = []
+        seen: set[str] = set()
 
         if include_gt:
             for j, gt in enumerate(rec.get("gt_images") or []):
+                key = _image_key(gt)
+                if dedup and key in seen:
+                    continue
+                seen.add(key)
                 p = qdir / f"gt_{j}.png"
                 _save_image(gt, p)
                 iid = f"{qid}_gt_{j}"
@@ -112,6 +131,10 @@ def build_examples(
         if num_candidates is not None:
             retrieved = retrieved[:num_candidates]
         for j, ret in enumerate(retrieved):
+            key = _image_key(ret)
+            if dedup and key in seen:
+                continue
+            seen.add(key)
             p = qdir / f"ret_{j}.png"
             _save_image(ret, p)
             candidates.append(
@@ -158,6 +181,14 @@ def main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Do not include ground-truth images as candidates.",
     )
+    parser.add_argument(
+        "--no_dedup",
+        action="store_true",
+        help=(
+            "Keep duplicate images in the pool. The default removes them, "
+            "as described in the paper (§5.1)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     image_dir = Path(args.image_dir)
@@ -170,6 +201,7 @@ def main(argv: List[str] | None = None) -> int:
         image_dir,
         num_candidates=args.num_candidates,
         include_gt=not args.no_gt,
+        dedup=not args.no_dedup,
     )
     n = write_candidate_pool(examples, args.output)
     print(f"Wrote {n} examples to {args.output} (images under {image_dir})")
