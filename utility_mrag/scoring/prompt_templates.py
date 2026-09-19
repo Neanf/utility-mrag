@@ -87,9 +87,10 @@ Answer with True or False."""
 # ---------------------------------------------------------------------------
 
 GENERATION_PROMPT_MRAG_BENCH = (
-    "You will be given one question concerning several images. "
-    "The first image is the input image, others are retrieved examples to help you. "
-    "Answer with the option's letter from the given choices directly."
+    "Instruction: You will be given one question concerning several images. "
+    "The first image is the input image; the remaining images are retrieved "
+    "examples to help you. Answer with the option's letter from the given "
+    "choices directly."
 )
 
 
@@ -150,6 +151,16 @@ def format_helpfulness_prompt(
     return raw.format(question=question)
 
 
+def format_lettered_choices(choices: dict | list | None) -> str:
+    """Render a choices block as ``(A) ...`` lines, the format the paper prints."""
+    if choices is None:
+        return ""
+    if isinstance(choices, dict):
+        return "\n".join(f"({k}) {v}" for k, v in choices.items())
+    letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
+    return "\n".join(f"({letters[i]}) {c}" for i, c in enumerate(choices))
+
+
 def format_generation_prompt(
     *,
     dataset: str,
@@ -161,5 +172,8 @@ def format_generation_prompt(
         raise ValueError(f"Unknown dataset: {dataset!r}")
     base = PROMPT_REGISTRY[dataset]["generation"]
     if dataset == "mrag_bench":
-        return f"{base}\n\nQuestion: {question}\nChoices:\n{format_choices(choices)}"
+        return (
+            f"{base}\n\nQuestion: {question}\n"
+            f"Choices:\n{format_lettered_choices(choices)}\nAnswer:"
+        )
     return f"{base}\n\nQuestion: {question}"
