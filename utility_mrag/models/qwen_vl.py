@@ -37,20 +37,38 @@ def _resolve_dtype(dtype: Optional[str]):
     }[dtype]
 
 
+# The checkpoint ships size={"longest_edge": 16777216, "shortest_edge": 65536}.
+# Tightening the ceiling must not move the floor, and the processor rejects a
+# size dict missing either key, so the floor is pinned to the checkpoint value.
+SHORTEST_EDGE_DEFAULT = 65536
+
+
 def processor_kwargs_from_config(config: ModelConfig) -> Dict[str, Any]:
     """Keyword arguments for ``AutoProcessor.from_pretrained``.
 
-    The released wrapper passes none, leaving the processor at the checkpoint
-    default of 16,777,216 pixels. That budget lets a single image become 65,536
-    patches, whose attention matrix no GPU can hold, so a pool containing large
-    images cannot be scored at all. Setting ``max_pixels`` in a model config
-    caps it; leaving it unset keeps the released behaviour untouched. Recorded
-    as F10 in our baseline-fidelity log.
+    The released wrapper passes none, leaving the processor at the checkpoint's
+    default budget of 16,777,216 pixels. That is a real cap but a very loose
+    one: a 20 MP image still becomes 65,208 patches. A model config may tighten
+    it by setting ``max_pixels``; leaving it unset keeps the released behaviour
+    exactly. Recorded as F10 in our baseline-fidelity log.
+
+    The budget is emitted as ``size``, **not** as ``max_pixels``.
+    ``Qwen2VLImageProcessorFast`` accepts a ``max_pixels`` argument, stores it
+    as an attribute, and never reads it; resizing is driven by
+    ``size["longest_edge"]``. An earlier version of this function passed
+    ``max_pixels`` and so did nothing at all, silently -- no exception, no
+    warning, and a sweep in which a 4 MP cap changed neither the runtime nor a
+    single Top-3 selection.
     """
-    max_pixels = config.extra.get("max_pixels")
-    if max_pixels is None:
+    budget = config.extra.get("max_pixels")
+    if budget is None:
         return {}
-    return {"max_pixels": int(max_pixels)}
+    return {
+        "size": {
+            "longest_edge": int(budget),
+            "shortest_edge": SHORTEST_EDGE_DEFAULT,
+        }
+    }
 
 
 @register_model("qwen3_vl")
