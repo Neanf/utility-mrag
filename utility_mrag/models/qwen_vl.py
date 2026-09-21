@@ -37,6 +37,22 @@ def _resolve_dtype(dtype: Optional[str]):
     }[dtype]
 
 
+def processor_kwargs_from_config(config: ModelConfig) -> Dict[str, Any]:
+    """Keyword arguments for ``AutoProcessor.from_pretrained``.
+
+    The released wrapper passes none, leaving the processor at the checkpoint
+    default of 16,777,216 pixels. That budget lets a single image become 65,536
+    patches, whose attention matrix no GPU can hold, so a pool containing large
+    images cannot be scored at all. Setting ``max_pixels`` in a model config
+    caps it; leaving it unset keeps the released behaviour untouched. Recorded
+    as F10 in our baseline-fidelity log.
+    """
+    max_pixels = config.extra.get("max_pixels")
+    if max_pixels is None:
+        return {}
+    return {"max_pixels": int(max_pixels)}
+
+
 @register_model("qwen3_vl")
 class Qwen3VLModel(BaseMultimodalModel):
     """Wrapper around `Qwen3VLForConditionalGeneration`.
@@ -66,7 +82,8 @@ class Qwen3VLModel(BaseMultimodalModel):
             self.config.model_name, **kwargs
         )
         self._processor = AutoProcessor.from_pretrained(
-            self.config.extra.get("processor_name", self.config.model_name)
+            self.config.extra.get("processor_name", self.config.model_name),
+            **processor_kwargs_from_config(self.config),
         )
         self._extractor = TrueFalseLogitExtractor(self._processor.tokenizer)
         logger.info("Loaded Qwen3-VL model %s", self.config.model_name)
